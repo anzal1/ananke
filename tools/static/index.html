@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ananke: Life Observer</title>
+    <style>
+        :root {
+            --bg-color: #0d0d0d;
+            --panel-bg: #1a1a1a;
+            --text-color: #e0e0e0;
+            --accent-color: #00ffaa;
+            --fail-color: #ff3333;
+            --grid-line: #222;
+        }
+        body {
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Consolas', 'Monaco', monospace;
+            overflow: hidden;
+            display: flex;
+            height: 100vh;
+        }
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+            cursor: crosshair;
+        }
+        canvas {
+            background-color: #050505;
+            display: block;
+        }
+        #sidebar {
+            width: 350px;
+            background-color: var(--panel-bg);
+            border-left: 1px solid #333;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+        h1, h2, h3 { margin: 0; color: var(--accent-color); text-transform: uppercase; letter-spacing: 1px; }
+        h1 { font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        
+        .stat-box {
+            background: #222;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .label { color: #888; }
+        .value { color: #fff; font-weight: bold; }
+        
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        button:hover { background: #444; border-color: var(--accent-color); }
+        button.active { background: var(--accent-color); color: #000; }
+        
+        .controls { display: flex; gap: 5px; flex-wrap: wrap; }
+        
+        #inspector { display: none; }
+        
+        /* Genome Graph */
+        .bar-container { display: flex; align-items: center; margin-bottom: 4px; font-size: 0.8rem; }
+        .bar-label { width: 100px; color: #aaa; }
+        .bar-track { flex-grow: 1; background: #333; height: 6px; position: relative; }
+        .bar-fill { height: 100%; background: var(--accent-color); }
+
+        .time-control {
+            margin-top: auto;
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }
+        #ticks-display { font-size: 2rem; color: #444; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <canvas id="simCanvas"></canvas>
+    </div>
+
+    <div id="sidebar">
+        <h1>Ananke Observer</h1>
+        
+        <div class="stat-box">
+            <div class="stat-row"><span class="label">Agents:</span> <span class="value" id="count-agents">0</span></div>
+            <div class="stat-row"><span class="label">Resources:</span> <span class="value" id="count-resources">0</span></div>
+            <div class="stat-row"><span class="label">Generation:</span> <span class="value" id="max-gen">0</span></div>
+        </div>
+
+        <div class="controls">
+            <button onclick="toggleGhostTrails()" id="btn-ghost" class="active">Ghost Trails</button>
+            <button onclick="toggleEnergyView()" id="btn-energy">Energy View</button>
+        </div>
+
+        <div id="inspector">
+            <h2>Inspector</h2>
+            <div class="stat-box">
+                <div class="stat-row"><span class="label">ID:</span> <span class="value" id="insp-id">...</span></div>
+                <div class="stat-row"><span class="label">Energy:</span> <span class="value" id="insp-energy">0</span></div>
+                <div class="stat-row"><span class="label">Age:</span> <span class="value" id="insp-age">0</span></div>
+                <div class="stat-row"><span class="label">Action:</span> <span class="value" id="insp-action">Wait</span></div>
+                <div class="stat-row"><span class="label">Parent:</span> <span class="value" id="insp-parent">None</span></div>
+                
+                <h3 style="margin-top: 10px; font-size: 0.9rem;">Genome</h3>
+                <div id="genome-bars"></div>
+            </div>
+        </div>
+        
+        <div class="time-control">
+            <div id="ticks-display">TICK: 0</div>
+            <div class="controls">
+                <button onclick="setSpeed(0)">||</button>
+                <button onclick="setSpeed(1)">1x</button>
+                <button onclick="setSpeed(5)">5x</button>
+                <button onclick="setSpeed(20)" class="active">20x</button>
+                <button onclick="setSpeed(100)">MAX</button>
+            </div>
+            <div style="font-size: 0.8rem; color: #666; margin-top: 5px;">Events Buffer: <span id="buffer-size">0</span></div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONSTANTS ---
+        const CANVAS = document.getElementById('simCanvas');
+        const CTX = CANVAS.getContext('2d');
+        const WORLD_W = 100;
+        const WORLD_H = 100;
+        let CELL_SIZE = 8; 
+
+        // --- STATE ---
+        let eventsBuffer = [];
+        let cursor = 0; // The index in eventsBuffer we have processed up to
+        let nextStart = 0; // For API polling
+        
+        // Simulation State (Reconstructed)
+        let agents = {}; // id -> {x, y, energy, genome, ...}
+        let resources = {}; // id -> {x, y, value}
+        let ghostTrails = []; // {x, y, age}
+        let effects = []; // {x, y, type, age} (Visual bangs)
+        
+        let selectedAgentId = null;
+        let tickCount = 0;
+        
+        // Settings
+        let speed = 20; // events per frame
+        let paused = false;
+        let showGhosts = true;
+        let showEnergy = false;
+        
+        // --- LOOP ---
+        function resize() {
+            CANVAS.width = document.getElementById('canvas-container').clientWidth;
+            CANVAS.height = window.innerHeight;
+            // Center grid
+            CELL_SIZE = Math.min(CANVAS.width / WORLD_W, CANVAS.height / WORLD_H);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function startLoop() {
+            requestAnimationFrame(loop);
+            setInterval(fetchEvents, 1000); // Poll every second
+        }
+
+        async function fetchEvents() {
+            try {
+                const res = await fetch(`/events?start=${nextStart}`);
+                const data = await res.json();
+                if (data.events && data.events.length > 0) {
+                    eventsBuffer.push(...data.events);
+                    nextStart = data.next_start;
+                }
+            } catch (e) {
+                console.error("Fetch failed", e);
+            }
+        }
+
+        function loop() {
+            if (!paused) {
+                // Process N events based on speed
+                let processed = 0;
+                while (cursor < eventsBuffer.length && processed < speed) {
+                    processEvent(eventsBuffer[cursor]);
+                    cursor++;
+                    processed++;
+                    tickCount++; // Approx logic, strict ticks track differently but this is fine for visuals
+                }
+            }
+
+            updateVisuals();
+            render();
+            updateUI();
+            
+            requestAnimationFrame(loop);
+        }
+
+        function processEvent(e) {
+            const d = e.details;
+            
+            if (e.type === 'agent_spawn') {
+                agents[d.id] = {
+                    id: d.id,
+                    x: d.x, y: d.y,
+                    displayX: d.x, displayY: d.y, // For lerp
+                    energy: 100,
+                    genome: d.genome || {},
+                    parent: d.parent,
+                    age: 0,
+                    action: 'born'
+                };
+            }
+            else if (e.type === 'agent_action') {
+                if (agents[d.id]) {
+                    const a = agents[d.id];
+                    a.energy = d.energy_after || a.energy;
+                    a.action = d.action;
+                    a.age++;
+                    
+                    if (d.success && d.action === 'move') {
+                        // Leave trail
+                        if (Math.random() > 0.5) ghostTrails.push({x: a.x, y: a.y, age: 0});
+                        
+                        // Update pos
+                        if (d.x !== undefined) {
+                            a.x = d.x;
+                            a.y = d.y;
+                        }
+                    }
+                    else if (d.success && d.action === 'consume') {
+                        effects.push({x: a.x, y: a.y, type: 'eat', age: 0});
+                    }
+                }
+            }
+            else if (e.type === 'agent_death') {
+                if (agents[d.id]) {
+                    effects.push({x: agents[d.id].x, y: agents[d.id].y, type: 'die', age: 0});
+                    delete agents[d.id];
+                    if (selectedAgentId === d.id) selectedAgentId = null;
+                }
+            }
+            else if (e.type === 'resource_spawn') {
+                resources[d.id] = { x: d.x, y: d.y, value: d.value };
+            }
+            else if (e.type === 'resource_deplete') {
+                delete resources[d.id];
+            }
+        }
+
+        function updateVisuals() {
+            // Lerp agents
+            for (let id in agents) {
+                let a = agents[id];
+                a.displayX += (a.x - a.displayX) * 0.3;
+                a.displayY += (a.y - a.displayY) * 0.3;
+            }
+            
+            // Age trails
+            for (let i = ghostTrails.length - 1; i >= 0; i--) {
+                ghostTrails[i].age += 1; // Fades per frame
+                if (ghostTrails[i].age > 100) ghostTrails.splice(i, 1);
+            }
+            
+            // Age effects
+            for (let i = effects.length - 1; i >= 0; i--) {
+                effects[i].age += 1;
+                if (effects[i].age > 20) effects.splice(i, 1);
+            }
+        }
+
+        function render() {
+            CTX.fillStyle = '#0d0d0d'; // Clear
+            CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
+            
+            CTX.save();
+            // Center View
+            const gridW = WORLD_W * CELL_SIZE;
+            const gridH = WORLD_H * CELL_SIZE;
+            const offsetX = (CANVAS.width - gridW) / 2;
+            const offsetY = (CANVAS.height - gridH) / 2;
+            CTX.translate(offsetX, offsetY);
+            
+            // Draw Grid Border
+            CTX.strokeStyle = '#222';
+            CTX.lineWidth = 1;
+            CTX.strokeRect(0, 0, gridW, gridH);
+
+            // 1. Ghost Trails
+            if (showGhosts) {
+                for (let t of ghostTrails) {
+                    const alpha = Math.max(0, 0.3 - (t.age / 100));
+                    CTX.fillStyle = `rgba(0, 255, 170, ${alpha})`;
+                    CTX.fillRect(t.x * CELL_SIZE, t.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                }
+            }
+            
+            // 2. Resources
+            CTX.fillStyle = '#4444ff';
+            for (let id in resources) {
+                let r = resources[id];
+                CTX.beginPath();
+                CTX.arc((r.x + 0.5) * CELL_SIZE, (r.y + 0.5) * CELL_SIZE, CELL_SIZE * 0.3, 0, Math.PI*2);
+                CTX.fill();
+            }
+            
+            // 3. Agents
+            for (let id in agents) {
+                let a = agents[id];
+                let x = a.displayX * CELL_SIZE;
+                let y = a.displayY * CELL_SIZE;
+                
+                // Color Logic
+                let color = '#00ffaa';
+                if (showEnergy) {
+                    // Heatmap style: Red (low) -> Green (high)
+                    let hue = Math.max(0, Math.min(120, a.energy / 1.5));
+                    color = `hsl(${hue}, 100%, 50%)`;
+                } else {
+                    // Lineage / Health
+                    // Simple: White for high energy, fading green for low
+                    let alpha = Math.max(0.3, Math.min(1, a.energy / 50));
+                    CTX.globalAlpha = alpha;
+                }
+                
+                if (selectedAgentId === id) {
+                    CTX.fillStyle = '#fff';
+                    CTX.strokeStyle = '#ff00ff';
+                    CTX.lineWidth = 2;
+                    CTX.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+                } else {
+                    CTX.fillStyle = color;
+                }
+                
+                CTX.fillRect(x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+                CTX.globalAlpha = 1.0;
+            }
+            
+            // 4. Effects (Bangs)
+            CTX.lineWidth = 2;
+            for (let e of effects) {
+                let radius = (e.age / 2) * CELL_SIZE;
+                let alpha = 1 - (e.age / 20);
+                
+                if (e.type === 'eat') {
+                    CTX.strokeStyle = `rgba(100, 255, 100, ${alpha})`;
+                } else {
+                    CTX.strokeStyle = `rgba(255, 50, 50, ${alpha})`;
+                }
+                
+                CTX.beginPath();
+                CTX.arc((e.x + 0.5)*CELL_SIZE, (e.y+0.5)*CELL_SIZE, radius, 0, Math.PI*2);
+                CTX.stroke();
+            }
+
+            CTX.restore();
+        }
+
+        function updateUI() {
+            document.getElementById('count-agents').innerText = Object.keys(agents).length;
+            document.getElementById('count-resources').innerText = Object.keys(resources).length;
+            document.getElementById('buffer-size').innerText = eventsBuffer.length - cursor;
+            document.getElementById('ticks-display').innerText = `TICK: ${tickCount}`;
+
+            // Inspector
+            const inspector = document.getElementById('inspector');
+            if (selectedAgentId && agents[selectedAgentId]) {
+                inspector.style.display = 'block';
+                const a = agents[selectedAgentId];
+                document.getElementById('insp-id').innerText = a.id.substring(0, 8);
+                document.getElementById('insp-energy').innerText = Math.round(a.energy);
+                document.getElementById('insp-age').innerText = a.age;
+                document.getElementById('insp-action').innerText = a.action;
+                document.getElementById('insp-parent').innerText = a.parent ? a.parent.substring(0, 8) : 'None';
+                
+                // Genome
+                const genomeContainer = document.getElementById('genome-bars');
+                genomeContainer.innerHTML = '';
+                for (let k in a.genome) {
+                    let v = a.genome[k];
+                    let pct = Math.round(v * 100);
+                    let row = document.createElement('div');
+                    row.className = 'bar-container';
+                    row.innerHTML = `<div class="bar-label">${k.replace('_', ' ')}</div>
+                                     <div class="bar-track"><div class="bar-fill" style="width: ${pct}%"></div></div>`;
+                    genomeContainer.appendChild(row);
+                }
+            } else {
+                inspector.style.display = 'none';
+            }
+        }
+
+        // --- CONTROLS ---
+        function setSpeed(s) {
+            speed = s;
+            paused = (s === 0);
+            document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+            // simple active logic...
+        }
+        
+        function toggleGhostTrails() {
+            showGhosts = !showGhosts;
+            document.getElementById('btn-ghost').classList.toggle('active');
+        }
+        
+        function toggleEnergyView() {
+            showEnergy = !showEnergy;
+            document.getElementById('btn-energy').classList.toggle('active');
+        }
+
+        // Interaction
+        CANVAS.addEventListener('mousemove', (e) => {
+            const rect = CANVAS.getBoundingClientRect();
+            const gridW = WORLD_W * CELL_SIZE;
+            const gridH = WORLD_H * CELL_SIZE;
+            const offsetX = (CANVAS.width - gridW) / 2;
+            const offsetY = (CANVAS.height - gridH) / 2;
+            
+            const mx = e.clientX - rect.left - offsetX;
+            const my = e.clientY - rect.top - offsetY;
+            
+            if (mx >= 0 && mx <= gridW && my >= 0 && my <= gridH) {
+                const gx = Math.floor(mx / CELL_SIZE);
+                const gy = Math.floor(my / CELL_SIZE);
+                
+                // Find agent at this pos
+                let found = null;
+                for (let id in agents) {
+                    // Approx hit test
+                    if (Math.abs(agents[id].x - gx) < 1 && Math.abs(agents[id].y - gy) < 1) {
+                        found = id;
+                        break;
+                    }
+                }
+                selectedAgentId = found; // Hover select
+            }
+        });
+
+        // Trigger
+        startLoop();
+
+    </script>
+</body>
+</html>

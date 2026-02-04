@@ -1,0 +1,190 @@
+.inspector-panel {
+  background: #0d1117;
+  border-left: 1px solid #21262d;
+  padding: 16px;
+  width: 280px;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inspector-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #c9d1d9;
+  font-weight: 500;
+}
+
+.no-selection {
+  color: #8b949e;
+  text-align: center;
+  padding: 32px 0;
+  font-size: 13px;
+}
+
+.agent-profile {
+  background: #161b22;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.agent-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #c9d1d9;
+  font-family: monospace;
+}
+
+.agent-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.agent-badge.origin {
+  background: #ffd70033;
+  color: #ffd700;
+}
+
+.agent-badge.descendant {
+  background: #58a6ff33;
+  color: #58a6ff;
+}
+
+.agent-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat-label {
+  display: block;
+  font-size: 10px;
+  color: #8b949e;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 14px;
+  color: #c9d1d9;
+  font-family: monospace;
+}
+
+.stat-value.alive {
+  color: #3fb950;
+}
+
+.stat-value.dead {
+  color: #f85149;
+}
+
+.genome-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  color: #8b949e;
+  font-weight: 500;
+}
+
+.genome-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.genome-label {
+  font-size: 11px;
+  color: #8b949e;
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.genome-track {
+  flex: 1;
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.genome-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #238636, #3fb950);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.genome-value {
+  font-size: 10px;
+  color: #8b949e;
+  font-family: monospace;
+  width: 36px;
+  text-align: right;
+}
+
+.agent-list {
+  margin-top: auto;
+}
+
+.agent-list h4 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.agent-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.agent-list-item:hover,
+.agent-list-item.selected {
+  background: #21262d;
+}
+
+.agent-list-item .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.agent-list-item .dot.origin {
+  background: #ffd700;
+}
+
+.agent-list-item .dot.descendant {
+  background: #58a6ff;
+}
+
+.agent-name {
+  flex: 1;
+  font-size: 12px;
+  color: #c9d1d9;
+  font-family: monospace;
+}
+
+.agent-energy {
+  font-size: 11px;
+  color: #8b949e;
+}
